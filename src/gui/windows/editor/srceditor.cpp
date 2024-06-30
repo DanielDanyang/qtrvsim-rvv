@@ -11,6 +11,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QPainter>
+#include <QScrollBar>
 #include <QTextCursor>
 #include <QTextDocumentWriter>
 #include <qglobal.h>
@@ -282,10 +283,56 @@ void SrcEditor::setShowLineNumbers(bool show) {
     updateMargins(0);
 }
 
+void SrcEditor::setEnableHighlight(bool enable) {
+    if (!enable) {
+        // clear old styles
+        QList<QTextEdit::ExtraSelection> extra_selections;
+        setExtraSelections(extra_selections);
+    }
+    enable_highlight = enable;
+}
+
+void SrcEditor::setEnableFocusChange(bool enable) {
+    enable_focus_change = enable;
+}
+
 void SrcEditor::insertFromMimeData(const QMimeData *source) {
     if (source->hasText()) { insertPlainText(source->text()); }
 }
 
 bool SrcEditor::canInsertFromMimeData(const QMimeData *source) const {
     return source->hasText();
+}
+
+void SrcEditor::highlightBlock(int block_num) {
+    QTextBlock block = document()->findBlockByNumber(block_num - 1);
+
+    if (enable_highlight) {
+        // set hightly style
+        QList<QTextEdit::ExtraSelection> extra_selections;
+        QTextEdit::ExtraSelection selection;
+        QColor lineColor = QColor(Qt::yellow).lighter(160);
+        selection.format.setBackground(lineColor);
+        selection.format.setProperty(QTextFormat::FullWidthSelection, true);
+
+        // move cursor
+        selection.cursor = QTextCursor(block);
+        // select until the end of block
+        selection.cursor.movePosition(
+            QTextCursor::EndOfBlock, QTextCursor::KeepAnchor, block.length());
+        // select an extra \n
+        selection.cursor.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, 1);
+        extra_selections.append(selection);
+        setExtraSelections(extra_selections);
+    }
+
+    if (enable_focus_change) {
+        // calculate viewport line count
+        int viewport_line_count
+            = viewport()->height() / QFontMetrics(document()->defaultFont()).height();
+        // scroll to block and show it in editor middle
+        QScrollBar *vScrollBar = verticalScrollBar();
+        vScrollBar->setValue(
+            vScrollBar->singleStep() * (block.firstLineNumber() - viewport_line_count / 2));
+    }
 }
