@@ -3,6 +3,7 @@
 #include "helper/async_modal.h"
 #include "machine/simulator_exception.h"
 #include "mainwindow/mainwindow.h"
+#include "common/polyfills/qt5/qfontmetrics.h"
 
 #include <utility>
 
@@ -173,6 +174,12 @@ NewDialog::NewDialog(QWidget *parent, QSettings *settings) : QDialog(parent) {
 
     ui->config_page_title->setStyleSheet("font-weight: bold");
     switch2page(config_pages_items.at(0));
+    QFontMetrics fm(config_pages_items.at(0)->font(0));
+    QSize min_size = ui->page_select_tree->minimumSize();
+    int min_width = QFontMetrics_horizontalAdvance(fm, " L1 Data Cache ");
+    if (min_size.width() < min_width)
+        min_size.setWidth(min_width);
+    ui->page_select_tree->setMinimumSize(min_size);
 }
 
 void NewDialog::switch2page(QTreeWidgetItem *current, QTreeWidgetItem *previous) {
