@@ -56,10 +56,11 @@ enum InstructionFlags : unsigned {
     IMF_CSR_TO_ALU = 1L << 21, /**< Instruction modifies the current value */
     IMF_ALU_RS_ID = 1L << 22,
     // RV64/32A - Atomic Memory Operations
-    IMF_AMO = 1L << 23,        /**< Instruction is AMO */
+    IMF_AMO = 1L << 23, /**< Instruction is AMO */
     // TODO do we want to add those signals to the visualization?
 
     IMF_RV64 = 1L << 24, /**< Mark instructions which are available in 64-bit mode only. */
+    IMF_VECTOR = 1L << 25
 };
 
 /**
@@ -108,6 +109,9 @@ public:
     //     uint16_t immediate);                      // Type I
     // Instruction(uint8_t opcode, Address address); // Type J
     Instruction(const Instruction &);
+
+    bool is_vector() const;
+    // VectorOp vector_op() const;
 
     static const Instruction NOP;
     static const Instruction UNKNOWN_INST;
@@ -274,6 +278,23 @@ struct RelocExpression {
     Instruction::Modifier pseudo_mod;
 };
 
+// struct InstructionMap {
+//     const char *name;
+//     Instruction::Type type = Instruction::UNKNOWN;
+//     AluCombinedOp alu = { .alu_op = AluOp::ADD };
+//     AccessControl mem_ctl = AC_NONE;
+//     const struct InstructionMap *subclass = nullptr; // when subclass is used then flags
+//                                                      // has special meaning
+//     const cvector<QString, 3> args;
+//     uint32_t code;
+//     uint32_t mask;
+//     union {
+//         decltype(std::underlying_type<InstructionFlags>::type()) flags;
+//         BitField subfield;
+//     };
+//     const InstructionMap *aliases = nullptr;
+// };
+// extern const InstructionMap VECTOR_map[];
 } // namespace machine
 
 Q_DECLARE_METATYPE(machine::Instruction)

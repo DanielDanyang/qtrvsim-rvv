@@ -396,6 +396,40 @@ static const struct InstructionMap STORE_map[] = {
     IM_UNKNOWN,
 };
 
+static const struct InstructionMap RVV_map[] = {
+    { "vadd.vv", IT_R, { .alu_op = AluOp::VADD_VV }, NOMEM, nullptr, {"d", "s", "t"}, 0x00000057, 0x0000707f, { .flags = FLAGS_ALU_T_R_STD }, nullptr },
+    IM_UNKNOWN,
+    { "vmul.vv", IT_R, { .alu_op = AluOp::VMUL_VV }, NOMEM, nullptr, {"d", "s", "t"}, 0x00002057, 0x0000707f, { .flags = FLAGS_ALU_T_R_STD }, nullptr },
+    { "vadd.vi", IT_R, { .alu_op = AluOp::VADD_VI }, NOMEM, nullptr, {"d", "s", "j"}, 0x00003057, 0x0000707f, { .flags = FLAGS_ALU_T_R_STD }, nullptr },
+    { "vadd.vx", IT_R, { .alu_op = AluOp::VADD_VX }, NOMEM, nullptr, {"d", "s", "t"}, 0x00004057, 0x0000707f, { .flags = FLAGS_ALU_T_R_STD }, nullptr },
+    IM_UNKNOWN,
+    IM_UNKNOWN,
+    { "vsetvl", IT_R, { .alu_op = AluOp::VSETVL }, NOMEM, nullptr, {"d", "s", "t"}, 0x00007057, 0x0000707f, { .flags = FLAGS_ALU_T_R_STD }, nullptr },
+    
+};
+
+static const struct InstructionMap VLW_map[] = {
+    IM_UNKNOWN,
+    IM_UNKNOWN,
+    IM_UNKNOWN,
+    IM_UNKNOWN,
+    IM_UNKNOWN,
+    IM_UNKNOWN,
+    { "vlw.v", IT_I, { .alu_op = AluOp::VLW_V }, AC_I32, nullptr, {"d", "o(s)"}, 0x00006007, 0x0000707f, { .flags = FLAGS_ALU_I_LOAD }, nullptr },
+    IM_UNKNOWN,
+};
+
+static const struct InstructionMap VSW_map[] = {
+    IM_UNKNOWN,
+    IM_UNKNOWN,
+    IM_UNKNOWN,
+    IM_UNKNOWN,
+    IM_UNKNOWN,
+    IM_UNKNOWN,
+    { "vsw.v", IT_S, { .alu_op = AluOp::VSW_V }, AC_U32, nullptr, {"t", "q(s)"}, 0x00006027, 0x0000707f, { .flags = FLAGS_ALU_I_STORE }, nullptr },
+    IM_UNKNOWN,
+};
+
 static const struct InstructionMap ADD_map[] = {
     {"add", IT_R, { .alu_op=AluOp::ADD }, NOMEM, nullptr, {"d", "s", "t"}, 0x00000033, 0xfe00707f, { .flags = FLAGS_ALU_T_R_STD }, nullptr},
     {"sub", IT_R, { .alu_op=AluOp::ADD }, NOMEM, nullptr, {"d", "s", "t"}, 0x40000033, 0xfe00707f, { .flags = FLAGS_ALU_T_R_STD | IMF_ALU_MOD }, inst_aliases_sub},
@@ -578,10 +612,9 @@ static const struct InstructionMap OP_32_map[] = {
 };
 
 // Full, uncomprese, instructions top level map
-
 static const struct InstructionMap I_inst_map[] = {
     {"load", IT_I, NOALU, NOMEM, LOAD_map, {}, 0x03, 0x7f, { .subfield = {3, 12} }, nullptr}, // LOAD
-    IM_UNKNOWN, // LOAD-FP
+    {"vlw", IT_I, NOALU, NOMEM, VLW_map, {}, 0x07, 0x7f, { .subfield = {3, 12} }, nullptr},
     IM_UNKNOWN, // custom-0
     {"misc-mem", IT_I, NOALU, NOMEM, MISC_MEM_map, {}, 0x0f, 0x7f, { .subfield = {3, 12} }, nullptr}, // MISC-MEM
     {"op-imm", IT_I, NOALU, NOMEM, OP_IMM_map, {}, 0x13, 0x7f, { .subfield = {3, 12} }, nullptr}, // OP-IMM
@@ -589,7 +622,7 @@ static const struct InstructionMap I_inst_map[] = {
     {"op-imm-32", IT_I, NOALU, NOMEM, OP_IMM_32_map, {}, 0x1b, 0x7f, { .subfield = {3, 12} }, nullptr}, // OP-IMM-32    IM_UNKNOWN, // OP-IMM-32
     IM_UNKNOWN, // 48b
     {"store", IT_I, NOALU, NOMEM, STORE_map, {}, 0x23, 0x7f, { .subfield = {3, 12} }, nullptr}, // STORE
-    IM_UNKNOWN, // STORE-FP
+    {"vsw", IT_S, NOALU, NOMEM, VSW_map, {}, 0x27, 0x7f, { .subfield = {3, 12} }, nullptr},
     IM_UNKNOWN, // custom-1
     {"amo", IT_R, NOALU, NOMEM, AMO_map, {}, 0x2f, 0x7f, { .subfield = {3, 12} }, nullptr}, // OP-32
     {"op", IT_R, NOALU, NOMEM, OP_map, {}, 0x33, 0x7f, { .subfield = {1, 25} }, nullptr}, // OP
@@ -601,7 +634,7 @@ static const struct InstructionMap I_inst_map[] = {
     IM_UNKNOWN, // NMSUB
     IM_UNKNOWN, // NMADD
     IM_UNKNOWN, // OP-FP
-    IM_UNKNOWN, // reserved
+    {"rvv", IT_R, NOALU, NOMEM, RVV_map, {}, 0x57, 0x7f, { .subfield = {3, 12} }, nullptr},
     IM_UNKNOWN, // custom-2/rv128
     IM_UNKNOWN, // 48b
     {"branch", IT_B, NOALU, NOMEM, BRANCH_map, {}, 0x63, 0x7f, { .subfield = {3, 12} }, nullptr}, // BRANCH
@@ -940,19 +973,37 @@ static int parse_reg_from_string(const QString &str, uint *chars_taken = nullptr
             *chars_taken = ctk;
             return res;
         }
-    } else {
-        auto data = str.toLocal8Bit();
-        int regnum = -1;
-        for (size_t i = 0; i < Rv_regnames.size(); i++) {
-            size_t len = std::strlen(Rv_regnames[i]);
-            if (size_t(data.size()) < len) continue;
-            if (std::strncmp(data.data(), Rv_regnames[i], len) == 0) {
-                *chars_taken = len;
-                regnum = (int)i;
+    } else if (str.at(0) == 'v') {
+        int res = 0;
+        int ctk = 1;
+        for (; ctk < str.size(); ctk += 1) {
+            auto c = str.at(ctk);
+            if (c >= '0' && c <= '9') {
+                res *= 10;
+                res += c.unicode() - '0';
+            } else {
+                break;
             }
         }
-        return regnum;
+        if (ctk == 0) {
+            return -1;
+        } else {
+            *chars_taken = ctk;
+            return res;
+        }
     }
+
+    auto data = str.toLocal8Bit();
+    int regnum = -1;
+    for (size_t i = 0; i < Rv_regnames.size(); i++) {
+        size_t len = std::strlen(Rv_regnames[i]);
+        if (size_t(data.size()) < len) continue;
+        if (std::strncmp(data.data(), Rv_regnames[i], len) == 0) {
+            *chars_taken = len;
+            regnum = (int)i;
+        }
+    }
+    return regnum;
 }
 
 const QString reloc_operators = QStringLiteral("+-/*|&^~");

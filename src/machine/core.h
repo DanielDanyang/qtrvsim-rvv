@@ -15,6 +15,7 @@
 #include "simulator_exception.h"
 
 #include <QObject>
+#include <vector> 
 
 namespace machine {
 
@@ -90,6 +91,8 @@ protected:
     /** Reference to interstage register MEM/WB inside core state. */
     MemoryInterstage &mem_wb;
 
+    std::vector<std::vector<uint32_t>> vector_registers; 
+
 signals:
     void stop_on_exception_reached();
     void step_started();
@@ -123,7 +126,7 @@ protected:
 
     FetchState fetch(PCInterstage pc, bool skip_break);
     DecodeState decode(const FetchInterstage &);
-    static ExecuteState execute(const DecodeInterstage &);
+    ExecuteState execute(const DecodeInterstage &);
     MemoryState memory(const ExecuteInterstage &);
     WritebackState writeback(const MemoryInterstage &);
 

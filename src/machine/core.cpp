@@ -5,20 +5,17 @@
 #include "utils.h"
 
 #include <cinttypes>
+#include <iostream>
 
 LOG_CATEGORY("machine.core");
 
 using namespace machine;
 
-static InstructionFlags unsupported_inst_flags_to_check(Xlen xlen,
-                            ConfigIsaWord isa_word) {
+static InstructionFlags unsupported_inst_flags_to_check(Xlen xlen, ConfigIsaWord isa_word) {
     unsigned flags_to_check = IMF_SUPPORTED;
-    if (xlen == Xlen::_32)
-        flags_to_check |= IMF_RV64;
-    if (!isa_word.contains('A'))
-        flags_to_check |= IMF_AMO;
-    if (!isa_word.contains('M'))
-        flags_to_check |= IMF_MUL;
+    if (xlen == Xlen::_32) flags_to_check |= IMF_RV64;
+    if (!isa_word.contains('A')) flags_to_check |= IMF_AMO;
+    if (!isa_word.contains('M')) flags_to_check |= IMF_MUL;
     return InstructionFlags(flags_to_check);
 }
 
@@ -44,7 +41,8 @@ Core::Core(
     , mem_data(mem_data)
     , mem_program(mem_program)
     , ex_handlers()
-    , ex_default_handler(new StopExceptionHandler()) {
+    , ex_default_handler(new StopExceptionHandler())
+    , vector_registers(10, std::vector<uint32_t>(32)) {
     stop_on_exception.fill(true);
     step_over_exception.fill(true);
     step_over_exception[EXCAUSE_INT] = false;
@@ -140,7 +138,7 @@ void Core::register_exception_handler(ExceptionCause excause, ExceptionHandler *
 
 bool Core::handle_exception(
     ExceptionCause excause,
-    const Instruction& inst,
+    const Instruction &inst,
     Address inst_addr,
     Address next_addr,
     Address jump_branch_pc,
@@ -158,7 +156,8 @@ bool Core::handle_exception(
         control_state->update_exception_cause(excause);
         if (control_state->read_internal(CSR::Id::MTVEC) != 0
             && !get_step_over_exception(excause)) {
-            control_state->exception_initiate(CSR::PrivilegeLevel::MACHINE, CSR::PrivilegeLevel::MACHINE);
+            control_state->exception_initiate(
+                CSR::PrivilegeLevel::MACHINE, CSR::PrivilegeLevel::MACHINE);
             regs->write_pc(control_state->exception_pc_address());
         }
     }
@@ -176,32 +175,32 @@ bool Core::handle_exception(
 }
 
 static int32_t amo32_operations(enum AccessControl memctl, int32_t a, int32_t b) {
-    switch(memctl) {
+    switch (memctl) {
     case AC_AMOSWAP32: return b;
-    case AC_AMOADD32:  return a + b;
-    case AC_AMOXOR32:  return a ^ b;
-    case AC_AMOAND32:  return a & b;
-    case AC_AMOOR32:   return a | b;
-    case AC_AMOMIN32:  return a < b? a: b;
-    case AC_AMOMAX32:  return a < b? b: a;
-    case AC_AMOMINU32: return (uint32_t)a < (uint32_t)b? a: b;
-    case AC_AMOMAXU32: return (uint32_t)a < (uint32_t)b? b: a;
+    case AC_AMOADD32: return a + b;
+    case AC_AMOXOR32: return a ^ b;
+    case AC_AMOAND32: return a & b;
+    case AC_AMOOR32: return a | b;
+    case AC_AMOMIN32: return a < b ? a : b;
+    case AC_AMOMAX32: return a < b ? b : a;
+    case AC_AMOMINU32: return (uint32_t)a < (uint32_t)b ? a : b;
+    case AC_AMOMAXU32: return (uint32_t)a < (uint32_t)b ? b : a;
     default: break;
     }
     return 0;
 }
 
 static int64_t amo64_operations(enum AccessControl memctl, int64_t a, int64_t b) {
-    switch(memctl) {
+    switch (memctl) {
     case AC_AMOSWAP64: return b;
-    case AC_AMOADD64:  return a + b;
-    case AC_AMOXOR64:  return a ^ b;
-    case AC_AMOAND64:  return a & b;
-    case AC_AMOOR64:   return a | b;
-    case AC_AMOMIN64:  return a < b? a: b;
-    case AC_AMOMAX64:  return a < b? b: a;
-    case AC_AMOMINU64: return (uint64_t)a < (uint64_t)b? a: b;
-    case AC_AMOMAXU64: return (uint64_t)a < (uint64_t)b? b: a;
+    case AC_AMOADD64: return a + b;
+    case AC_AMOXOR64: return a ^ b;
+    case AC_AMOAND64: return a & b;
+    case AC_AMOOR64: return a | b;
+    case AC_AMOMIN64: return a < b ? a : b;
+    case AC_AMOMAX64: return a < b ? b : a;
+    case AC_AMOMINU64: return (uint64_t)a < (uint64_t)b ? a : b;
+    case AC_AMOMAXU64: return (uint64_t)a < (uint64_t)b ? b : a;
     default: break;
     }
     return 0;
@@ -252,8 +251,7 @@ enum ExceptionCause Core::memory_special(
             towrite_val = 1;
         }
         break;
-    case AC_FISRT_AMO_MODIFY32 ... AC_LAST_AMO_MODIFY32:
-    {
+    case AC_FISRT_AMO_MODIFY32 ... AC_LAST_AMO_MODIFY32: {
         if (!memread || !memwrite) { break; }
         int32_t fetched_value;
         fetched_value = (int32_t)(mem_data->read_u32(mem_addr));
@@ -262,8 +260,7 @@ enum ExceptionCause Core::memory_special(
         towrite_val = fetched_value;
         break;
     }
-    case AC_FISRT_AMO_MODIFY64 ... AC_LAST_AMO_MODIFY64:
-    {
+    case AC_FISRT_AMO_MODIFY64 ... AC_LAST_AMO_MODIFY64: {
         if (!memread || !memwrite) { break; }
         int64_t fetched_value;
         fetched_value = (int64_t)(mem_data->read_u64(mem_addr));
@@ -287,9 +284,7 @@ FetchState Core::fetch(PCInterstage pc, bool skip_break) {
 
     if (!skip_break && hw_breaks.contains(inst_addr)) { excause = EXCAUSE_HWBREAK; }
 
-    if (control_state != nullptr) {
-        control_state->increment_internal(CSR::Id::MCYCLE, 1);
-    }
+    if (control_state != nullptr) { control_state->increment_internal(CSR::Id::MCYCLE, 1); }
 
     if (control_state != nullptr && excause == EXCAUSE_NONE) {
         if (control_state->core_interrupt_request()) { excause = EXCAUSE_INT; }
@@ -315,9 +310,7 @@ DecodeState Core::decode(const FetchInterstage &dt) {
 
     dt.inst.flags_alu_op_mem_ctl(flags, alu_op, mem_ctl);
 
-    if ((flags ^ check_inst_flags_val) & check_inst_flags_mask) {
-        excause = EXCAUSE_INSN_ILLEGAL;
-    }
+    if ((flags ^ check_inst_flags_val) & check_inst_flags_mask) { excause = EXCAUSE_INSN_ILLEGAL; }
 
     RegisterId num_rs = (flags & (IMF_ALU_REQ_RS | IMF_ALU_RS_ID)) ? dt.inst.rs() : 0;
     RegisterId num_rt = (flags & IMF_ALU_REQ_RT) ? dt.inst.rt() : 0;
@@ -343,9 +336,10 @@ DecodeState Core::decode(const FetchInterstage &dt) {
             // TODO: EXCAUSE_ECALL_S, EXCAUSE_ECALL_U
         }
     }
-    if (flags & IMF_FORCE_W_OP)
-        w_operation = true;
-
+    if (flags & IMF_FORCE_W_OP) w_operation = true;
+    // std::cout << "[DEBUG] Instruction opcode: 0x" << std::hex << dt.inst.data()
+    //           << ", ALU operation (binary): " << std::bitset<4>(static_cast<int>(alu_op.alu_op))
+    //           << std::endl;
     return { DecodeInternalState {
                  .alu_op_num = static_cast<unsigned>(alu_op.alu_op),
                  .excause_num = static_cast<unsigned>(excause),
@@ -366,8 +360,9 @@ DecodeState Core::decode(const FetchInterstage &dt) {
                                 .excause = excause,
                                 .ff_rs = FORWARD_NONE,
                                 .ff_rt = FORWARD_NONE,
-                                .alu_component = (flags & IMF_AMO) ? AluComponent::PASS :
-                                                 (flags & IMF_MUL) ? AluComponent::MUL : AluComponent::ALU,
+                                .alu_component = (flags & IMF_AMO)   ? AluComponent::PASS
+                                                 : (flags & IMF_MUL) ? AluComponent::MUL
+                                                                     : AluComponent::ALU,
                                 .aluop = alu_op,
                                 .memctl = mem_ctl,
                                 .num_rs = num_rs,
@@ -394,6 +389,7 @@ DecodeState Core::decode(const FetchInterstage &dt) {
                                 .xret = bool(flags & IMF_XRET),
                                 .insert_stall_before = bool(flags & IMF_CSR) } };
 }
+// static int debug_counter = 0;
 
 ExecuteState Core::execute(const DecodeInterstage &dt) {
     enum ExceptionCause excause = dt.excause;
@@ -402,15 +398,150 @@ ExecuteState Core::execute(const DecodeInterstage &dt) {
         if (dt.alu_pc) return RegisterValue(dt.inst_addr.get_raw());
         return dt.val_rs;
     }();
+
     const RegisterValue alu_sec = [=] {
         if (dt.csr_to_alu) return dt.csr_read_val;
         if (dt.alusrc) return dt.immediate_val;
         return dt.val_rt;
     }();
-    const RegisterValue alu_val = [=] {
-        if (excause != EXCAUSE_NONE) return RegisterValue(0);
-        return alu_combined_operate(dt.aluop, dt.alu_component, dt.w_operation, dt.alu_mod, alu_fst, alu_sec);
-    }();
+
+    RegisterValue alu_val; // remove out of scope
+
+    switch (dt.aluop.alu_op) {
+    case AluOp::VADD_VV: {
+        uint8_t vd = dt.num_rd;
+        uint8_t vs1 = dt.num_rs;
+        uint8_t vs2 = dt.num_rt;
+
+        if (vd >= vector_registers.size() || vs1 >= vector_registers.size()
+            || vs2 >= vector_registers.size()) {
+            throw std::runtime_error("Invalid vector register index");
+        }
+
+        for (size_t i = 0; i < vector_registers[vd].size(); ++i) {
+            vector_registers[vd][i] = vector_registers[vs1][i] + vector_registers[vs2][i];
+        }
+        break;
+    }
+    case AluOp::VADD_VX: {
+        uint8_t vd = dt.num_rd;
+        uint8_t vs = dt.num_rs;
+        uint8_t rs = dt.num_rt;
+
+        if (vd >= vector_registers.size() || vs >= vector_registers.size() || rs >= 32) {
+            throw std::runtime_error("Invalid register index");
+        }
+
+        uint32_t scalar_value = regs->read_gp(rs).as_u32();
+
+        for (size_t i = 0; i < vector_registers[vd].size(); ++i) {
+            vector_registers[vd][i] = vector_registers[vs][i] + scalar_value;
+        }
+        break;
+    }
+    case AluOp::VADD_VI: {
+        uint8_t vd = dt.num_rd;
+        uint8_t vs = dt.num_rs;
+        int32_t imm = dt.immediate_val.as_i32();
+
+        if (vd >= vector_registers.size() || vs >= vector_registers.size()) {
+            throw std::runtime_error("Invalid vector register index");
+        }
+
+        for (size_t i = 0; i < vector_registers[vd].size(); ++i) {
+            vector_registers[vd][i] = vector_registers[vs][i] + imm;
+        }
+        break;
+    }
+    case AluOp::VLW_V: {
+        uint8_t vd = dt.num_rd;
+        uint8_t rs = dt.num_rs;
+        int32_t offset = dt.immediate_val.as_i32();
+
+        if (vd >= vector_registers.size() || rs >= 32) {
+            throw std::runtime_error("Invalid register index");
+        }
+
+        uint32_t base_addr = regs->read_gp(rs).as_u32() + offset;
+        state.cycle_count += 32; // 32 cycles for loading 32 words
+
+        for (size_t i = 0; i < vector_registers[vd].size(); ++i) {
+            vector_registers[vd][i] = mem_data->read_u32(Address(base_addr + i * 4));
+            state.cycle_count++;
+        }
+        break;
+    }
+    case AluOp::VMUL_VV: {
+        uint8_t vd = dt.num_rd;
+        uint8_t vs1 = dt.num_rs;
+        uint8_t vs2 = dt.num_rt;
+
+        if (vd >= vector_registers.size() || vs1 >= vector_registers.size()
+            || vs2 >= vector_registers.size()) {
+            throw std::runtime_error("Invalid vector register index");
+        }
+
+        state.cycle_count += 4; // 4 cycles
+
+        for (size_t i = 0; i < vector_registers[vd].size(); ++i) {
+            vector_registers[vd][i] = vector_registers[vs1][i] * vector_registers[vs2][i];
+        }
+        break;
+    }
+    case AluOp::VSW_V: {
+        uint8_t vs = dt.num_rs;
+        uint8_t rs = dt.num_rt;
+        int32_t offset = dt.immediate_val.as_i32();
+
+        if (vs >= vector_registers.size() || rs >= 32) {
+            throw std::runtime_error("Invalid register index");
+        }
+
+        uint32_t base_addr = regs->read_gp(rs).as_u32() + offset;
+
+        for (size_t i = 0; i < vector_registers[vs].size(); ++i) {
+            mem_data->write_u32(Address(base_addr + i * 4), vector_registers[vs][i]);
+        }
+        break;
+    }
+    case AluOp::VSETVL: {
+        uint8_t rd = dt.num_rd;
+
+        if (rd >= 32) { throw std::runtime_error("Invalid register index"); }
+
+        uint32_t value = dt.val_rs.as_u32();
+
+        // std::cout << "VSETVL val_rs: " << value << std::endl;
+
+        alu_val = RegisterValue(value);
+        break;
+    }
+
+    default: {
+        if (excause == EXCAUSE_NONE) {
+            alu_val = alu_combined_operate(
+                dt.aluop, dt.alu_component, dt.w_operation, dt.alu_mod, alu_fst, alu_sec);
+        }
+        break;
+    }
+    }
+    // if (dt.aluop.alu_op == AluOp::ADD) {
+    //     // for (int i = 0; i < 20; ++i) {
+    //     //     std::cout << "x" << i << ": " << regs->read_gp(i).as_u32() << std::endl;
+    //     // }
+    //     std::cout << "x" << 5 << ": " << regs->read_gp(5).as_u32() << std::endl;
+    //     std::cout << "x" << 29 << ": " << regs->read_gp(29).as_u32() << std::endl;
+    // }
+    // if (dt.aluop.alu_op == AluOp::VSETVL) {
+    //     std::cout << "---- Register Values ----" << std::endl;
+    //     for (int i = 0; i < 32; ++i) {
+    //         std::cout << "x" << i << ": " << regs->read_gp(i).as_u32() << std::endl;
+    //     }
+    // }
+    // if (dt.aluop.alu_op == AluOp::SLT) {
+    //     std::cout << "VSETVL: rs1 (x" << (int)dt.val_rt << ") = " << std::endl;
+    // }
+    // debug_counter++;
     const Address branch_jal_target = dt.inst_addr + dt.immediate_val.as_i64();
 
     const unsigned stall_status = [=] {
@@ -502,11 +633,13 @@ MemoryState Core::memory(const ExecuteInterstage &dt) {
     // Predictor update
     if (dt.branch_jal) {
         // JAL Jump instruction (J-type (alternative to U-type with different immediate bit order))
-        predictor->update(dt.inst, dt.inst_addr, dt.branch_jal_target, BranchType::JUMP, BranchResult::TAKEN);
+        predictor->update(
+            dt.inst, dt.inst_addr, dt.branch_jal_target, BranchType::JUMP, BranchResult::TAKEN);
     } else if (dt.branch_jalr) {
         // JALR Jump register instruction (I-type)
         predictor->update(
-            dt.inst, dt.inst_addr, Address(get_xlen_from_reg(dt.alu_val)), BranchType::JUMP, BranchResult::TAKEN);
+            dt.inst, dt.inst_addr, Address(get_xlen_from_reg(dt.alu_val)), BranchType::JUMP,
+            BranchResult::TAKEN);
     } else if (dt.branch_bxx) {
         // BXX Conditional branch instruction (B-type (alternative to S-type with different
         // immediate bit order))
@@ -525,9 +658,11 @@ MemoryState Core::memory(const ExecuteInterstage &dt) {
         if (dt.xret) {
             control_state->exception_return(CSR::PrivilegeLevel::MACHINE);
             if (this->xlen == Xlen::_32)
-                computed_next_inst_addr = Address(control_state->read_internal(CSR::Id::MEPC).as_u32());
+                computed_next_inst_addr
+                    = Address(control_state->read_internal(CSR::Id::MEPC).as_u32());
             else
-                computed_next_inst_addr = Address(control_state->read_internal(CSR::Id::MEPC).as_u64());
+                computed_next_inst_addr
+                    = Address(control_state->read_internal(CSR::Id::MEPC).as_u64());
             csr_written = true;
         }
     }
@@ -572,12 +707,12 @@ MemoryState Core::memory(const ExecuteInterstage &dt) {
                  .csr_written = csr_written,
              } };
 }
-
+// 待改
 WritebackState Core::writeback(const MemoryInterstage &dt) {
     if (dt.regwrite) { regs->write_gp(dt.num_rd, dt.towrite_val); }
 
     return WritebackState { WritebackInternalState {
-        .inst = (dt.excause == EXCAUSE_NONE)? dt.inst: Instruction::NOP,
+        .inst = (dt.excause == EXCAUSE_NONE) ? dt.inst : Instruction::NOP,
         .inst_addr = dt.inst_addr,
         .value = dt.towrite_val,
         .num_rd = dt.num_rd,
