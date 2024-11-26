@@ -2,6 +2,7 @@
 
 #include "common/logging.h"
 #include "execute/alu.h"
+#include "execute/alu_op.h"
 #include "utils.h"
 
 #include <cinttypes>
@@ -42,6 +43,7 @@ Core::Core(
     , mem_program(mem_program)
     , ex_handlers()
     , ex_default_handler(new StopExceptionHandler())
+    , current_vl(32)
     , vector_registers(10, std::vector<uint32_t>(32)) {
     stop_on_exception.fill(true);
     step_over_exception.fill(true);
@@ -340,6 +342,9 @@ DecodeState Core::decode(const FetchInterstage &dt) {
     // std::cout << "[DEBUG] Instruction opcode: 0x" << std::hex << dt.inst.data()
     //           << ", ALU operation (binary): " << std::bitset<4>(static_cast<int>(alu_op.alu_op))
     //           << std::endl;
+    // if (alu_op.alu_op == AluOp::VADD_VI) {
+    //     std::cout << "Immediate Value" << immediate_val.as_i32() << std::endl;
+    // }
     return { DecodeInternalState {
                  .alu_op_num = static_cast<unsigned>(alu_op.alu_op),
                  .excause_num = static_cast<unsigned>(excause),
@@ -389,7 +394,24 @@ DecodeState Core::decode(const FetchInterstage &dt) {
                                 .xret = bool(flags & IMF_XRET),
                                 .insert_stall_before = bool(flags & IMF_CSR) } };
 }
-// static int debug_counter = 0;
+
+void Core::recursive_vector_addition(
+    const std::vector<uint32_t> &vec1,
+    const std::vector<uint32_t> &vec2,
+    std::vector<uint32_t> &vec_dest,
+    size_t start,
+    size_t end) {
+    if (start == end - 1) {
+        vec_dest[start] = vec1[start] + vec2[start];
+        return;
+    }
+
+    size_t mid = start + (end - start) / 2;
+
+    recursive_vector_addition(vec1, vec2, vec_dest, start, mid);
+
+    recursive_vector_addition(vec1, vec2, vec_dest, mid, end);
+}
 
 ExecuteState Core::execute(const DecodeInterstage &dt) {
     enum ExceptionCause excause = dt.excause;
@@ -413,30 +435,51 @@ ExecuteState Core::execute(const DecodeInterstage &dt) {
         uint8_t vs1 = dt.num_rs;
         uint8_t vs2 = dt.num_rt;
 
-        if (vd >= vector_registers.size() || vs1 >= vector_registers.size()
-            || vs2 >= vector_registers.size()) {
-            throw std::runtime_error("Invalid vector register index");
-        }
+        auto &vec1 = vector_registers[vs1];
+        auto &vec2 = vector_registers[vs2];
+        auto &vec_dest = vector_registers[vd];
 
-        for (size_t i = 0; i < vector_registers[vd].size(); ++i) {
-            vector_registers[vd][i] = vector_registers[vs1][i] + vector_registers[vs2][i];
-        }
+        size_t n = current_vl; 
+
+        recursive_vector_addition(vec1, vec2, vec_dest, 0, n);
+
+        state.cycle_count += std::ceil(std::log2(current_vl));
+        state.cycle_count--;
+
+        // std::cout << "VV Vector Registers State:\n";
+        // for (size_t i = 0; i < vector_registers.size(); ++i) {
+        //     std::cout << "v" << i << ": ";
+        //     for (size_t j = 0; j < vector_registers[i].size(); ++j) {
+        //         std::cout << vector_registers[i][j] << " ";
+        //     }
+        //     std::cout << "\n";
+        // }
         break;
     }
+
     case AluOp::VADD_VX: {
         uint8_t vd = dt.num_rd;
         uint8_t vs = dt.num_rs;
         uint8_t rs = dt.num_rt;
 
-        if (vd >= vector_registers.size() || vs >= vector_registers.size() || rs >= 32) {
-            throw std::runtime_error("Invalid register index");
-        }
 
         uint32_t scalar_value = regs->read_gp(rs).as_u32();
+        state.cycle_count += current_vl; // Add vector length cycles
+        state.cycle_count--;
 
-        for (size_t i = 0; i < vector_registers[vd].size(); ++i) {
+        for (size_t i = 0; i < current_vl; ++i) {
             vector_registers[vd][i] = vector_registers[vs][i] + scalar_value;
         }
+
+        // Print all vector registers after each instruction execution
+        // std::cout << "VX Vector Registers State:\n";
+        // for (size_t i = 0; i < vector_registers.size(); ++i) {
+        //     std::cout << "v" << i << ": ";
+        //     for (size_t j = 0; j < vector_registers[i].size(); ++j) {
+        //         std::cout << vector_registers[i][j] << " ";
+        //     }
+        //     std::cout << "\n";
+        // }
         break;
     }
     case AluOp::VADD_VI: {
@@ -448,9 +491,21 @@ ExecuteState Core::execute(const DecodeInterstage &dt) {
             throw std::runtime_error("Invalid vector register index");
         }
 
-        for (size_t i = 0; i < vector_registers[vd].size(); ++i) {
+        state.cycle_count += current_vl; // Add vector length cycles
+        state.cycle_count--;
+
+        for (size_t i = 0; i < current_vl; ++i) {
             vector_registers[vd][i] = vector_registers[vs][i] + imm;
         }
+        // Print all vector registers after each instruction execution
+        // std::cout << "VI Vector Registers State:\n";
+        // for (size_t i = 0; i < vector_registers.size(); ++i) {
+        //     std::cout << "v" << i << ": ";
+        //     for (size_t j = 0; j < vector_registers[i].size(); ++j) {
+        //         std::cout << vector_registers[i][j] << " ";
+        //     }
+        //     std::cout << "\n";
+        // }
         break;
     }
     case AluOp::VLW_V: {
@@ -458,17 +513,23 @@ ExecuteState Core::execute(const DecodeInterstage &dt) {
         uint8_t rs = dt.num_rs;
         int32_t offset = dt.immediate_val.as_i32();
 
-        if (vd >= vector_registers.size() || rs >= 32) {
-            throw std::runtime_error("Invalid register index");
-        }
-
         uint32_t base_addr = regs->read_gp(rs).as_u32() + offset;
-        state.cycle_count += 32; // 32 cycles for loading 32 words
+        state.cycle_count += 32;         // 32 cycles for loading 32 words
+        state.cycle_count += current_vl; // Add vector length cycles
+        state.cycle_count--;
 
-        for (size_t i = 0; i < vector_registers[vd].size(); ++i) {
+        for (size_t i = 0; i < current_vl; ++i) {
             vector_registers[vd][i] = mem_data->read_u32(Address(base_addr + i * 4));
-            state.cycle_count++;
         }
+        // // Print all vector registers after each instruction execution
+        // std::cout << "VLW Vector Registers State:\n";
+        // for (size_t i = 0; i < vector_registers.size(); ++i) {
+        //     std::cout << "v" << i << ": ";
+        //     for (size_t j = 0; j < vector_registers[i].size(); ++j) {
+        //         std::cout << vector_registers[i][j] << " ";
+        //     }
+        //     std::cout << "\n";
+        // }
         break;
     }
     case AluOp::VMUL_VV: {
@@ -481,39 +542,75 @@ ExecuteState Core::execute(const DecodeInterstage &dt) {
             throw std::runtime_error("Invalid vector register index");
         }
 
-        state.cycle_count += 4; // 4 cycles
+        state.cycle_count += 4;          // 4 cycles
+        state.cycle_count += current_vl; // Add vector length cycles
+        state.cycle_count--;
 
-        for (size_t i = 0; i < vector_registers[vd].size(); ++i) {
+        for (size_t i = 0; i < current_vl; ++i) {
             vector_registers[vd][i] = vector_registers[vs1][i] * vector_registers[vs2][i];
         }
+
+        // Print all vector registers after each instruction execution
+        // std::cout << "VMUL Vector Registers State:\n";
+        // for (size_t i = 0; i < vector_registers.size(); ++i) {
+        //     std::cout << "v" << i << ": ";
+        //     for (size_t j = 0; j < vector_registers[i].size(); ++j) {
+        //         std::cout << vector_registers[i][j] << " ";
+        //     }
+        //     std::cout << "\n";
+        // }
         break;
     }
     case AluOp::VSW_V: {
-        uint8_t vs = dt.num_rs;
-        uint8_t rs = dt.num_rt;
+        uint8_t vs = dt.num_rt;
+        uint8_t rs = dt.num_rs;
         int32_t offset = dt.immediate_val.as_i32();
 
-        if (vs >= vector_registers.size() || rs >= 32) {
-            throw std::runtime_error("Invalid register index");
-        }
+        // std::cout << "[DEBUG] VSW_V Instruction\n";
+        // std::cout << "Source vector register (vs): " << static_cast<int>(vs) << "\n";
+        // std::cout << "Base address register (rs): " << static_cast<int>(rs) << "\n";
+        // std::cout << "Offset: " << std::hex << offset << "\n";
+
 
         uint32_t base_addr = regs->read_gp(rs).as_u32() + offset;
+        state.cycle_count += current_vl; // Add vector length cycles
+        state.cycle_count--;
 
-        for (size_t i = 0; i < vector_registers[vs].size(); ++i) {
-            mem_data->write_u32(Address(base_addr + i * 4), vector_registers[vs][i]);
+        // std::cout << "[DEBUG] Base address: 0x" << std::hex << base_addr << std::dec << "\n";
+
+        for (size_t i = 0; i < current_vl; ++i) {
+            Address write_addr = Address(base_addr + i * 4);
+            uint32_t data = vector_registers[vs][i];
+
+            // std::cout << "[DEBUG] Writing data: 0x" << std::hex << data << " to address: 0x"
+            //           << write_addr.get_raw() << std::dec << "\n";
+
+            mem_data->write_u32(write_addr, data);
         }
         break;
     }
-    case AluOp::VSETVL: {
-        uint8_t rd = dt.num_rd;
 
-        if (rd >= 32) { throw std::runtime_error("Invalid register index"); }
+    case AluOp::VSETVL: {
+        for (auto &vec : vector_registers) {
+            std::fill(vec.begin(), vec.end(), 0);
+        }
+
 
         uint32_t value = dt.val_rs.as_u32();
+        current_vl = std::min(value, static_cast<uint32_t>(vector_registers[0].size()));
+        state.cycle_count += 1; // Add vector length cycles
+        state.cycle_count--;
 
-        // std::cout << "VSETVL val_rs: " << value << std::endl;
-
-        alu_val = RegisterValue(value);
+        alu_val = RegisterValue(current_vl);
+        // Print all vector registers after each instruction execution
+        // std::cout << "VSETVL Vector Registers State:\n";
+        // for (size_t i = 0; i < vector_registers.size(); ++i) {
+        //     std::cout << "v" << i << ": ";
+        //     for (size_t j = 0; j < vector_registers[i].size(); ++j) {
+        //         std::cout << vector_registers[i][j] << " ";
+        //     }
+        //     std::cout << "\n";
+        // }
         break;
     }
 
@@ -525,23 +622,7 @@ ExecuteState Core::execute(const DecodeInterstage &dt) {
         break;
     }
     }
-    // if (dt.aluop.alu_op == AluOp::ADD) {
-    //     // for (int i = 0; i < 20; ++i) {
-    //     //     std::cout << "x" << i << ": " << regs->read_gp(i).as_u32() << std::endl;
-    //     // }
-    //     std::cout << "x" << 5 << ": " << regs->read_gp(5).as_u32() << std::endl;
-    //     std::cout << "x" << 29 << ": " << regs->read_gp(29).as_u32() << std::endl;
-    // }
-    // if (dt.aluop.alu_op == AluOp::VSETVL) {
-    //     std::cout << "---- Register Values ----" << std::endl;
-    //     for (int i = 0; i < 32; ++i) {
-    //         std::cout << "x" << i << ": " << regs->read_gp(i).as_u32() << std::endl;
-    //     }
-    // }
-    // if (dt.aluop.alu_op == AluOp::SLT) {
-    //     std::cout << "VSETVL: rs1 (x" << (int)dt.val_rt << ") = " << std::endl;
-    // }
-    // debug_counter++;
+
     const Address branch_jal_target = dt.inst_addr + dt.immediate_val.as_i64();
 
     const unsigned stall_status = [=] {
@@ -632,7 +713,8 @@ MemoryState Core::memory(const ExecuteInterstage &dt) {
 
     // Predictor update
     if (dt.branch_jal) {
-        // JAL Jump instruction (J-type (alternative to U-type with different immediate bit order))
+        // JAL Jump instruction (J-type (alternative to U-type with different immediate bit
+        // order))
         predictor->update(
             dt.inst, dt.inst_addr, dt.branch_jal_target, BranchType::JUMP, BranchResult::TAKEN);
     } else if (dt.branch_jalr) {
@@ -707,7 +789,7 @@ MemoryState Core::memory(const ExecuteInterstage &dt) {
                  .csr_written = csr_written,
              } };
 }
-// 待改
+
 WritebackState Core::writeback(const MemoryInterstage &dt) {
     if (dt.regwrite) { regs->write_gp(dt.num_rd, dt.towrite_val); }
 
@@ -819,14 +901,14 @@ void CorePipelined::do_step(bool skip_break) {
             mem_wb.excause, mem_wb.inst, mem_wb.inst_addr, mem_wb.computed_next_inst_addr,
             jump_branch_pc, mem_wb.mem_addr);
     } else if (detect_mispredicted_jump() || mem_wb.csr_written) {
-        /* If the jump was predicted incorrectly or csr register was written, we need to flush the
-         * pipeline. */
+        /* If the jump was predicted incorrectly or csr register was written, we need to flush
+         * the pipeline. */
         flush_and_continue_from_address(mem_wb.computed_next_inst_addr);
     } else if (exception_in_progress) {
-        /* An exception is in progress which caused the pipeline before the exception to be flushed.
-         * Therefore, next pc cannot be determined from if_id (now NOP).
-         * To make the visualization cleaner we stop fetching (and PC update) until the exception
-         * is handled. */
+        /* An exception is in progress which caused the pipeline before the exception to be
+         * flushed. Therefore, next pc cannot be determined from if_id (now NOP). To make the
+         * visualization cleaner we stop fetching (and PC update) until the exception is
+         * handled. */
         pc_if.stop_if = true;
     } else if (stall || is_stall_requested()) {
         /* Fetch from the same PC is repeated due to stall in the pipeline. */

@@ -15,7 +15,7 @@
 #include "simulator_exception.h"
 
 #include <QObject>
-#include <vector> 
+#include <vector>
 
 namespace machine {
 
@@ -90,8 +90,8 @@ protected:
     ExecuteInterstage &ex_mem;
     /** Reference to interstage register MEM/WB inside core state. */
     MemoryInterstage &mem_wb;
-
-    std::vector<std::vector<uint32_t>> vector_registers; 
+    uint32_t current_vl;
+    std::vector<std::vector<uint32_t>> vector_registers;
 
 signals:
     void stop_on_exception_reached();
@@ -129,6 +129,12 @@ protected:
     ExecuteState execute(const DecodeInterstage &);
     MemoryState memory(const ExecuteInterstage &);
     WritebackState writeback(const MemoryInterstage &);
+    void recursive_vector_addition(
+        const std::vector<uint32_t> &vec1,
+        const std::vector<uint32_t> &vec2,
+        std::vector<uint32_t> &vec_dest,
+        size_t start,
+        size_t end);
 
     /**
      * This function computes the address, the next executed instruction should be on. The word

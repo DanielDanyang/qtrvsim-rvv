@@ -400,7 +400,7 @@ static const struct InstructionMap RVV_map[] = {
     { "vadd.vv", IT_R, { .alu_op = AluOp::VADD_VV }, NOMEM, nullptr, {"d", "s", "t"}, 0x00000057, 0x0000707f, { .flags = FLAGS_ALU_T_R_STD }, nullptr },
     IM_UNKNOWN,
     { "vmul.vv", IT_R, { .alu_op = AluOp::VMUL_VV }, NOMEM, nullptr, {"d", "s", "t"}, 0x00002057, 0x0000707f, { .flags = FLAGS_ALU_T_R_STD }, nullptr },
-    { "vadd.vi", IT_R, { .alu_op = AluOp::VADD_VI }, NOMEM, nullptr, {"d", "s", "j"}, 0x00003057, 0x0000707f, { .flags = FLAGS_ALU_T_R_STD }, nullptr },
+    { "vadd.vi", IT_I, { .alu_op = AluOp::VADD_VI }, NOMEM, nullptr, {"d", "s", "j"}, 0x00003057, 0x0000707f, { .flags = FLAGS_ALU_T_R_STD }, nullptr },
     { "vadd.vx", IT_R, { .alu_op = AluOp::VADD_VX }, NOMEM, nullptr, {"d", "s", "t"}, 0x00004057, 0x0000707f, { .flags = FLAGS_ALU_T_R_STD }, nullptr },
     IM_UNKNOWN,
     IM_UNKNOWN,
